@@ -1,0 +1,230 @@
+{
+  "name": "devcor-ai-assistant",
+  "displayName": "DEVCOR - AI Code Assistant",
+  "description": "DEVCOR: AI-powered code generation, review, and refactoring assistant. Your intelligent coding companion.",
+  "version": "1.0.0",
+  "publisher": "devcor",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Linters",
+    "Snippets"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "aiCodeAssistant.explainCode",
+        "title": "AI: Explain Selected Code",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.fixCode",
+        "title": "AI: Fix Issues in Selected Code",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.addDocumentation",
+        "title": "AI: Add Documentation",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.refactorCode",
+        "title": "AI: Refactor Code",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.reviewCode",
+        "title": "AI: Review Code Quality",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.generateTests",
+        "title": "AI: Generate Unit Tests",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.openChat",
+        "title": "AI: Open Chat Panel",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.acceptSuggestion",
+        "title": "AI: Accept Suggestion",
+        "category": "AI Assistant"
+      },
+      {
+        "command": "aiCodeAssistant.rejectSuggestion",
+        "title": "AI: Reject Suggestion",
+        "category": "AI Assistant"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.explainCode",
+          "group": "ai@1"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.fixCode",
+          "group": "ai@2"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.addDocumentation",
+          "group": "ai@3"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.refactorCode",
+          "group": "ai@4"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.reviewCode",
+          "group": "ai@5"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "aiCodeAssistant.generateTests",
+          "group": "ai@6"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "aiCodeAssistant.explainCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aiCodeAssistant.fixCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aiCodeAssistant.addDocumentation",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aiCodeAssistant.refactorCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aiCodeAssistant.reviewCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "aiCodeAssistant.generateTests",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "aiAssistant",
+          "title": "AI Code Assistant",
+          "icon": "resources/ai-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "aiAssistant": [
+        {
+          "type": "webview",
+          "id": "aiAssistant.chatView",
+          "name": "AI Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "AI Code Assistant",
+      "properties": {
+        "aiCodeAssistant.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "URL of the Django backend server"
+        },
+        "aiCodeAssistant.customRules": {
+          "type": "string",
+          "default": "",
+          "description": "Custom coding rules (one per line)"
+        },
+        "aiCodeAssistant.autoSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically save file after accepting suggestion"
+        },
+        "aiCodeAssistant.showInlineDecorations": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show inline decorations for AI suggestions"
+        },
+        "aiCodeAssistant.defaultFocus": {
+          "type": "string",
+          "default": "general",
+          "enum": ["general", "security", "performance", "style", "bugs"],
+          "description": "Default focus for code reviews"
+        }
+      }
+    },
+    "keybindings": [
+      {
+        "command": "aiCodeAssistant.explainCode",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "aiCodeAssistant.fixCode",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "aiCodeAssistant.acceptSuggestion",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "aiCodeAssistant.hasSuggestion"
+      },
+      {
+        "command": "aiCodeAssistant.rejectSuggestion",
+        "key": "escape",
+        "when": "aiCodeAssistant.hasSuggestion"
+      },
+      {
+        "command": "aiCodeAssistant.openChat",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^20.x",
+    "@typescript-eslint/eslint-plugin": "^6.x",
+    "@typescript-eslint/parser": "^6.x",
+    "eslint": "^8.x",
+    "typescript": "^5.3.0",
+    "@vscode/test-electron": "^2.3.0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}

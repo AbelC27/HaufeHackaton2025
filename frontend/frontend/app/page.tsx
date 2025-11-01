@@ -9,6 +9,7 @@ import AuthModal from '@/components/AuthModal';
 import DiffViewer from '@/components/DiffViewer';
 import GistLoader from '@/components/GistLoader';
 import AnalyticsDashboard from '@/components/AnalyticsDashboard';
+import Navigation from '@/components/Navigation';
 import fileDownload from 'js-file-download';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useAutoSave } from '@/hooks/useAutoSave';
@@ -119,6 +120,8 @@ export default function Home() {
   const [isFixing, setIsFixing] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [customRules, setCustomRules] = useState<string>('');
+  const [effortEstimation, setEffortEstimation] = useState<number>(0);
   
   // User auth
   const [user, setUser] = useState<any>(null);
@@ -161,22 +164,44 @@ export default function Home() {
     }
   }, []);
 
-  // Check auth state
+  // Check auth state and load custom rules
   useEffect(() => {
     if (!supabaseClient) return;
 
     supabaseClient.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      if (session?.user?.email) {
+        fetchCustomRules(session.user.email);
+      }
     });
 
     const {
       data: { subscription },
     } = supabaseClient.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      if (session?.user?.email) {
+        fetchCustomRules(session.user.email);
+      } else {
+        setCustomRules('');
+      }
     });
 
     return () => subscription.unsubscribe();
   }, [supabaseClient]);
+
+  // Fetch user's custom coding rules
+  const fetchCustomRules = async (email: string) => {
+    try {
+      const response = await fetch(`/api/profiles?user_email=${encodeURIComponent(email)}`);
+      const result = await response.json();
+
+      if (response.ok && result.data) {
+        setCustomRules(result.data.custom_rules || '');
+      }
+    } catch (err) {
+      console.error('Failed to fetch custom rules:', err);
+    }
+  };
 
   // Keyboard shortcuts
   useKeyboardShortcuts([
@@ -270,7 +295,7 @@ export default function Home() {
     const startTime = Date.now();
 
     try {
-      // Step 1: Get AI review from Django
+      // Step 1: Get AI review from Django with custom rules and effort estimation
       const reviewResponse = await fetch('http://127.0.0.1:8000/api/review/', {
         method: 'POST',
         headers: {
@@ -279,7 +304,9 @@ export default function Home() {
         body: JSON.stringify({ 
           code: code,
           language: language,
-          focus: focus
+          focus: focus,
+          custom_rules: customRules,
+          estimate_effort: true
         }),
       });
 
@@ -293,9 +320,13 @@ export default function Home() {
       }
 
       const reviewText = reviewData.review;
+      const effortMinutes = reviewData.effort_estimation_minutes || 0;
       const reviewTime = ((Date.now() - startTime) / 1000).toFixed(1);
+      
       setReview(reviewText);
-      showToast(`Review completed in ${reviewTime}s!`, 'success');
+      setEffortEstimation(effortMinutes);
+      
+      showToast(`Review completed in ${reviewTime}s! Estimated effort: ${effortMinutes}m`, 'success', 4000);
 
       // Clear draft after successful review
       clearSaved();
@@ -315,6 +346,7 @@ export default function Home() {
               focus: focus,
               user_email: user.email,
               tags: tags,
+              effort_estimation_minutes: effortMinutes,
             }),
           });
 
@@ -346,7 +378,7 @@ export default function Home() {
     showToast('Generating automatic fix...', 'info', 3000);
 
     try {
-      // Call AI service with auto_fix flag
+      // Call AI service with auto_fix flag, custom rules, and effort estimation
       const response = await fetch('http://127.0.0.1:8000/api/review/', {
         method: 'POST',
         headers: {
@@ -356,7 +388,9 @@ export default function Home() {
           code: code,
           language: language,
           focus: focus,
-          auto_fix: true
+          auto_fix: true,
+          custom_rules: customRules,
+          estimate_effort: true
         }),
       });
 
@@ -372,9 +406,11 @@ export default function Home() {
       const reviewText = data.review || '';
       const fixedCodeText = data.fixed_code || '';
       const hasFix = data.has_fix || false;
+      const effortMinutes = data.effort_estimation_minutes || 0;
 
       setReview(reviewText);
       setFixedCode(fixedCodeText);
+      setEffortEstimation(effortMinutes);
 
       if (fixedCodeText && fixedCodeText.length > 20) {
         showToast('✨ Auto-fix generated! Click "Apply Fix" to use it.', 'success', 4000);
@@ -401,6 +437,7 @@ export default function Home() {
               focus: focus,
               user_email: user.email,
               tags: [...tags, 'auto-fix'],
+              effort_estimation_minutes: effortMinutes,
             }),
           });
           await fetchHistory();
@@ -690,27 +727,30 @@ Generated by AI Code Review Platform
             </button>
           </div>
 
-          <div className="flex items-center gap-3">
-            {user ? (
-              <>
-                <span className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-                  {user.email}
-                </span>
+          <div className="flex items-center gap-4">
+            {user && <Navigation theme={theme} />}
+            <div className="flex items-center gap-3">
+              {user ? (
+                <>
+                  <span className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {user.email}
+                  </span>
+                  <button
+                    onClick={handleSignOut}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  >
+                    Sign Out
+                  </button>
+                </>
+              ) : (
                 <button
-                  onClick={handleSignOut}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                  onClick={() => setShowAuthModal(true)}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 text-sm"
                 >
-                  Sign Out
+                  Sign In / Sign Up
                 </button>
-              </>
-            ) : (
-              <button
-                onClick={() => setShowAuthModal(true)}
-                className="px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 text-sm"
-              >
-                Sign In / Sign Up
-              </button>
-            )}
+              )}
+            </div>
           </div>
         </div>
 
@@ -960,7 +1000,19 @@ Generated by AI Code Review Platform
           <div className={`${cardBgClass} rounded-lg border ${borderClass} shadow-xl overflow-hidden flex flex-col h-[600px]`}>
             <div className={`${theme === 'dark' ? 'bg-gray-900' : 'bg-gray-100'} px-4 py-3 border-b ${borderClass}`}>
               <div className="flex items-center justify-between">
-                <h2 className={`text-lg font-semibold ${textClass}`}>AI Review</h2>
+                <div className="flex items-center gap-3">
+                  <h2 className={`text-lg font-semibold ${textClass}`}>AI Review</h2>
+                  {effortEstimation > 0 && (
+                    <span className={`text-xs ${theme === 'dark' ? 'bg-orange-900/50 text-orange-300' : 'bg-orange-100 text-orange-700'} px-2 py-1 rounded flex items-center gap-1`}>
+                      ⏱️ {effortEstimation}m to fix
+                    </span>
+                  )}
+                  {customRules && (
+                    <span className={`text-xs ${theme === 'dark' ? 'bg-purple-900/50 text-purple-300' : 'bg-purple-100 text-purple-700'} px-2 py-1 rounded flex items-center gap-1`}>
+                      ⚙️ Custom rules active
+                    </span>
+                  )}
+                </div>
                 {fixedCode && (
                   <button
                     onClick={handleApplyFix}

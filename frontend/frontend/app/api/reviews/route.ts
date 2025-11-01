@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { input_code, review, language, focus, user_email } = body;
+    const { input_code, review, language, focus, user_email, effort_estimation_minutes, tags } = body;
 
     if (!input_code || !review) {
       return NextResponse.json(
@@ -25,10 +25,15 @@ export async function POST(request: NextRequest) {
       review,
       language: language || 'python',
       focus: focus || 'general',
+      effort_estimation_minutes: effort_estimation_minutes || 0,
     };
 
     if (user_email) {
       data.user_email = user_email;
+    }
+
+    if (tags && Array.isArray(tags)) {
+      data.tags = tags;
     }
 
     const { data: insertedData, error } = await supabase

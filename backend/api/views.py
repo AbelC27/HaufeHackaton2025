@@ -1,4 +1,5 @@
 import requests
+import re
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
@@ -10,8 +11,8 @@ def review_code(request):
     AI Code Review endpoint - Only handles LLM interaction.
     Frontend handles all Supabase operations.
     
-    Expects: {"code": "...", "language": "python", "focus": "general", "auto_fix": false}
-    Returns: {"review": "AI feedback...", "fixed_code": "..."} (if auto_fix=true)
+    Expects: {"code": "...", "language": "python", "focus": "general", "auto_fix": false, "custom_rules": "...", "estimate_effort": true}
+    Returns: {"review": "AI feedback...", "fixed_code": "...", "effort_estimation_minutes": 15}
     """
     
     # Get the code from request
@@ -19,6 +20,8 @@ def review_code(request):
     language = request.data.get('language', 'python').lower()
     focus = request.data.get('focus', 'general').lower()
     auto_fix = request.data.get('auto_fix', False)
+    custom_rules = request.data.get('custom_rules', '')
+    estimate_effort = request.data.get('estimate_effort', True)
     
     if not code_to_review:
         return Response(
@@ -49,6 +52,33 @@ def review_code(request):
     style_guide = language_styles.get(language, 'common best practices')
     focus_instruction = focus_instructions.get(focus, focus_instructions['general'])
     
+    # Build custom rules section
+    custom_rules_section = ""
+    if custom_rules and custom_rules.strip():
+        custom_rules_section = f"""
+        
+        IMPORTANT - CUSTOM CODING GUIDELINES:
+        The developer has specified these custom rules that MUST be enforced:
+        ---
+        {custom_rules}
+        ---
+        Make sure to check the code against these custom guidelines and highlight any violations.
+        """
+
+    # Build effort estimation section
+    effort_section = ""
+    if estimate_effort:
+        effort_section = """
+        
+        EFFORT ESTIMATION:
+        At the end of your review, provide an estimated time in minutes to fix all identified issues.
+        Format it exactly as: "**Estimated Effort:** X minutes" where X is a number between 5-120.
+        Consider:
+        - Number and complexity of issues
+        - Code size and refactoring scope
+        - Testing requirements
+        """
+
     if auto_fix:
         # Prompt for auto-fix mode - ask for fixed code in structured format
         prompt = f"""
@@ -56,6 +86,7 @@ def review_code(request):
         Analyze this code and provide a fixed, improved version.
         {focus_instruction}
         Follow {style_guide} guidelines.
+        {custom_rules_section}
         
         IMPORTANT: You MUST provide the complete corrected code.
         
@@ -71,6 +102,7 @@ def review_code(request):
         
         ## Explanation
         [Explain what was changed and why]
+        {effort_section}
         
         Code to fix:
         ---
@@ -86,6 +118,7 @@ def review_code(request):
         Analyze the following {language.upper()} code and provide a clear, structured review.
         {focus_instruction}
         Consider {style_guide} style guidelines.
+        {custom_rules_section}
         
         Provide your feedback in the following format:
         
@@ -100,6 +133,7 @@ def review_code(request):
         
         ## Positive Aspects
         [What the code does well]
+        {effort_section}
         
         Code to review:
         ---
@@ -124,10 +158,31 @@ def review_code(request):
         response_data = response.json()
         review_text = response_data.get("response", "Error: No response from model.")
 
+        import re
+        
+        # Extract effort estimation if present
+        effort_minutes = 0
+        if estimate_effort:
+            effort_pattern = r'\*\*Estimated Effort:\*\*\s*(\d+)\s*minutes?'
+            effort_match = re.search(effort_pattern, review_text, re.IGNORECASE)
+            if effort_match:
+                effort_minutes = int(effort_match.group(1))
+            else:
+                # Fallback: try simpler pattern
+                effort_pattern2 = r'estimated?\s+(?:effort|time)[:\s]+(\d+)\s*(?:minutes?|mins?)'
+                effort_match2 = re.search(effort_pattern2, review_text, re.IGNORECASE)
+                if effort_match2:
+                    effort_minutes = int(effort_match2.group(1))
+                else:
+                    # Default estimation based on review length and issue count
+                    high_issues = len(re.findall(r'severity:\s*high', review_text, re.IGNORECASE))
+                    medium_issues = len(re.findall(r'severity:\s*medium', review_text, re.IGNORECASE))
+                    low_issues = len(re.findall(r'severity:\s*low', review_text, re.IGNORECASE))
+                    effort_minutes = (high_issues * 15) + (medium_issues * 10) + (low_issues * 5)
+                    effort_minutes = max(5, min(120, effort_minutes))  # Clamp between 5-120
+
         if auto_fix:
             # Extract fixed code from the response
-            import re
-            
             fixed_code = ''
             
             # Method 1: Try to extract code from markdown code blocks
@@ -154,11 +209,98 @@ def review_code(request):
             return Response({
                 'review': review_text,
                 'fixed_code': fixed_code,
-                'has_fix': bool(fixed_code)
+                'has_fix': bool(fixed_code),
+                'effort_estimation_minutes': effort_minutes
             })
         else:
-            return Response({'review': review_text})
+            return Response({
+                'review': review_text,
+                'effort_estimation_minutes': effort_minutes
+            })
 
+    except requests.exceptions.ConnectionError:
+        return Response(
+            {'error': 'Connection Error. Is the Ollama server running?'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+    except requests.exceptions.RequestException as e:
+        return Response(
+            {'error': f'An error occurred: {e}'}, 
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+
+@api_view(['POST'])
+def follow_up_review(request):
+    """
+    Conversational follow-up endpoint for review discussions.
+    Allows users to ask questions about their review.
+    
+    Expects: {
+        "original_code": "...",
+        "original_review": "...",
+        "user_question": "Why is this a problem?",
+        "language": "python"
+    }
+    Returns: {"ai_response": "..."}
+    """
+    
+    original_code = request.data.get('original_code', '')
+    original_review = request.data.get('original_review', '')
+    user_question = request.data.get('user_question', '')
+    language = request.data.get('language', 'python').lower()
+    
+    if not user_question:
+        return Response(
+            {'error': 'No question provided.'}, 
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Build conversational prompt
+    prompt = f"""
+    You are an expert {language.upper()} programming mentor engaged in a helpful conversation.
+    
+    CONTEXT:
+    A developer submitted this code for review:
+    ---
+    {original_code[:1000]}  
+    ---
+    
+    You previously provided this review:
+    ---
+    {original_review[:2000]}
+    ---
+    
+    Now the developer asks: "{user_question}"
+    
+    Provide a clear, helpful answer that:
+    1. Directly addresses their question
+    2. Provides code examples if relevant
+    3. Explains concepts in simple terms
+    4. Suggests concrete next steps
+    5. Encourages good coding practices
+    
+    Keep your response conversational and educational. Use markdown formatting for code.
+    
+    Your response:
+    """
+    
+    ollama_url = "http://localhost:11434/api/generate"
+    payload = {
+        "model": "codellama",
+        "prompt": prompt,
+        "stream": False
+    }
+    
+    try:
+        response = requests.post(ollama_url, json=payload, timeout=120)
+        response.raise_for_status()
+        
+        response_data = response.json()
+        ai_response = response_data.get("response", "Error: No response from model.")
+        
+        return Response({'ai_response': ai_response})
+        
     except requests.exceptions.ConnectionError:
         return Response(
             {'error': 'Connection Error. Is the Ollama server running?'}, 

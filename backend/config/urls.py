@@ -16,9 +16,10 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
-from api.views import review_code
+from api.views import review_code, follow_up_review
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/review/', review_code, name='review_code'),
+    path('api/follow-up/', follow_up_review, name='follow_up_review'),
 ]

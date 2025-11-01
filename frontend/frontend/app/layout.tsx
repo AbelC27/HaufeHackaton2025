@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Code Review Platform",
-  description: "Get instant, intelligent feedback on your code from our local AI reviewer",
+  title: "DEVCOR - AI Code Review Platform",
+  description: "DEVCOR: Get instant, intelligent feedback on your code from our local AI reviewer with conversational follow-ups and technical debt tracking",
 };
 
 export default function RootLayout({
