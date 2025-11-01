@@ -82,60 +82,72 @@ export class SuggestionManager {
         const { editor, range, newCode } = this.currentSuggestion;
 
         try {
-            // Check if editor is still valid and not closed
-            const activeEditor = vscode.window.activeTextEditor;
-            const targetEditor = activeEditor && activeEditor.document.uri.toString() === editor.document.uri.toString() 
-                ? activeEditor 
-                : editor;
+            // STEP 1: Close all diff viewers first!
+            await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+            
+            // STEP 2: Wait a moment for editors to close
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // STEP 3: Reopen the original document
+            const document = await vscode.workspace.openTextDocument(editor.document.uri);
+            const newEditor = await vscode.window.showTextDocument(document, {
+                preview: false,
+                preserveFocus: false
+            });
+            
+            // STEP 4: Apply the changes
+            const success = await newEditor.edit(editBuilder => {
+                editBuilder.replace(range, newCode);
+            });
 
-            // Verify the editor's document is still open
-            const isDocumentOpen = vscode.workspace.textDocuments.some(
-                doc => doc.uri.toString() === editor.document.uri.toString()
-            );
-
-            if (!isDocumentOpen) {
-                // Reopen the document
-                const document = await vscode.workspace.openTextDocument(editor.document.uri);
-                const newEditor = await vscode.window.showTextDocument(document);
-                
-                await newEditor.edit(editBuilder => {
-                    editBuilder.replace(range, newCode);
-                });
-
-                // Save if configured
-                const config = vscode.workspace.getConfiguration('aiCodeAssistant');
-                if (config.get<boolean>('autoSave')) {
-                    await document.save();
-                }
-            } else {
-                // Use the target editor to apply changes
-                await targetEditor.edit(editBuilder => {
-                    editBuilder.replace(range, newCode);
-                });
-
-                // Save if configured
-                const config = vscode.workspace.getConfiguration('aiCodeAssistant');
-                if (config.get<boolean>('autoSave')) {
-                    await targetEditor.document.save();
-                }
+            if (!success) {
+                throw new Error('Failed to apply edit');
             }
 
-            vscode.window.showInformationMessage('✓ AI suggestion accepted!');
+            // STEP 5: Save if configured
+            const config = vscode.workspace.getConfiguration('aiCodeAssistant');
+            if (config.get<boolean>('autoSave', true)) {
+                await document.save();
+            }
+
+            vscode.window.showInformationMessage('✓ AI suggestion accepted and applied!');
             this.cleanup();
 
         } catch (error: any) {
-            vscode.window.showErrorMessage(`Failed to apply suggestion: ${error.message}`);
+            vscode.window.showErrorMessage(`Error applying suggestion: ${error.message}`);
             console.error('Error applying suggestion:', error);
+            
+            // Try to reopen the file anyway
+            try {
+                await vscode.workspace.openTextDocument(editor.document.uri);
+                await vscode.window.showTextDocument(editor.document);
+            } catch (reopenError) {
+                console.error('Could not reopen document:', reopenError);
+            }
         }
     }
 
-    rejectSuggestion() {
+    async rejectSuggestion() {
         if (!this.currentSuggestion) {
             return;
         }
 
-        vscode.window.showInformationMessage('AI suggestion rejected');
-        this.cleanup();
+        const { editor } = this.currentSuggestion;
+
+        try {
+            // Close all editors (including diff)
+            await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+            
+            // Reopen the original document
+            await vscode.workspace.openTextDocument(editor.document.uri);
+            await vscode.window.showTextDocument(editor.document);
+            
+            vscode.window.showInformationMessage('AI suggestion rejected');
+        } catch (error) {
+            console.error('Error rejecting suggestion:', error);
+        } finally {
+            this.cleanup();
+        }
     }
 
     private async showDiff(

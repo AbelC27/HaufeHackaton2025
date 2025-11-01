@@ -99,8 +99,8 @@ function registerCommands(context: vscode.ExtensionContext) {
 
     // Reject Suggestion
     context.subscriptions.push(
-        vscode.commands.registerCommand('aiCodeAssistant.rejectSuggestion', () => {
-            suggestionManager.rejectSuggestion();
+        vscode.commands.registerCommand('aiCodeAssistant.rejectSuggestion', async () => {
+            await suggestionManager.rejectSuggestion();
         })
     );
 }
