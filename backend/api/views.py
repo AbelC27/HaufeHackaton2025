@@ -1,86 +1,163 @@
-import logging
 import requests
-from django.conf import settings
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
 
-logger = logging.getLogger(__name__)
-
-
-def _record_review_in_supabase(input_code: str, review_text: str) -> None:
-    """Persist the latest review to Supabase if the client is configured."""
-    supabase_client = getattr(settings, 'supabase', None)
-    if not supabase_client:
-        return
-
-    try:
-        response = (
-            supabase_client
-            .table('code_reviews')
-            .insert({'input_code': input_code, 'review': review_text})
-            .execute()
-        )
-
-        error = getattr(response, 'error', None)
-        if error:
-            message = getattr(error, 'message', None)
-            if not message and isinstance(error, dict):
-                message = error.get('message')
-            logger.warning('Supabase insert error: %s', message or error)
-    except Exception as exc:  # pragma: no cover - defensive logging only
-        logger.exception('Failed to store review in Supabase: %s', exc)
-
-
-@api_view(['POST']) # This means this function only accepts POST requests
+@api_view(['POST'])
 def review_code(request):
     """
-    This is our API endpoint.
-    It expects a JSON payload like: {"code": "print('hello')"}
+    AI Code Review endpoint - Only handles LLM interaction.
+    Frontend handles all Supabase operations.
+    
+    Expects: {"code": "...", "language": "python", "focus": "general", "auto_fix": false}
+    Returns: {"review": "AI feedback...", "fixed_code": "..."} (if auto_fix=true)
     """
     
-    # 1. Get the code from the user's request
+    # Get the code from request
     code_to_review = request.data.get('code', '')
+    language = request.data.get('language', 'python').lower()
+    focus = request.data.get('focus', 'general').lower()
+    auto_fix = request.data.get('auto_fix', False)
+    
     if not code_to_review:
         return Response(
             {'error': 'No code provided.'}, 
             status=status.HTTP_400_BAD_REQUEST
         )
 
-    # 2. This is the prompt we will send to the local LLM
-    prompt = f"""
-    You are an expert code reviewer for a hackathon. 
-    Analyze the following Python code and provide a brief, bulleted list 
-    of feedback. Focus on bugs, style (PEP8), and potential improvements.
+    # Build context-aware prompt based on language and focus
+    focus_instructions = {
+        'general': 'Focus on bugs, code style, best practices, and potential improvements.',
+        'security': 'Focus on security vulnerabilities, input validation, authentication issues, and potential exploits.',
+        'performance': 'Focus on performance bottlenecks, optimization opportunities, memory usage, and algorithmic efficiency.',
+        'style': 'Focus on code style, readability, naming conventions, and adherence to language-specific style guides.',
+        'bugs': 'Focus on identifying bugs, logic errors, edge cases, and potential runtime issues.'
+    }
     
-    Code to review:
-    ---
-    {code_to_review}
-    ---
-    Your review:
-    """
+    language_styles = {
+        'python': 'PEP8',
+        'javascript': 'ESLint/Airbnb',
+        'typescript': 'TSLint/ESLint',
+        'java': 'Google Java Style',
+        'csharp': 'Microsoft C# Conventions',
+        'go': 'Effective Go',
+        'rust': 'Rust Style Guide',
+        'ruby': 'Ruby Style Guide',
+    }
+    
+    style_guide = language_styles.get(language, 'common best practices')
+    focus_instruction = focus_instructions.get(focus, focus_instructions['general'])
+    
+    if auto_fix:
+        # Prompt for auto-fix mode - ask for fixed code in structured format
+        prompt = f"""
+        You are an expert {language.upper()} programmer and code reviewer.
+        Analyze this code and provide a fixed, improved version.
+        {focus_instruction}
+        Follow {style_guide} guidelines.
+        
+        IMPORTANT: You MUST provide the complete corrected code.
+        
+        Provide your response in this EXACT format:
+        
+        ## Analysis
+        [What's wrong with the code and what needs to be fixed]
+        
+        ## Fixed Code
+        ```{language}
+        [PUT THE COMPLETE CORRECTED CODE HERE]
+        ```
+        
+        ## Explanation
+        [Explain what was changed and why]
+        
+        Code to fix:
+        ---
+        {code_to_review}
+        ---
+        
+        Your response (follow the format above):
+        """
+    else:
+        # Standard review prompt
+        prompt = f"""
+        You are an expert code reviewer with deep knowledge of {language.upper()}.
+        Analyze the following {language.upper()} code and provide a clear, structured review.
+        {focus_instruction}
+        Consider {style_guide} style guidelines.
+        
+        Provide your feedback in the following format:
+        
+        ## Summary
+        [Brief overview of the code quality]
+        
+        ## Issues Found
+        [List critical issues with severity: HIGH/MEDIUM/LOW]
+        
+        ## Suggestions
+        [Specific improvement recommendations]
+        
+        ## Positive Aspects
+        [What the code does well]
+        
+        Code to review:
+        ---
+        {code_to_review}
+        ---
+        
+        Your detailed review:
+        """
 
-    # 3. Send the prompt to the Ollama server
-    # (Make sure your Ollama app is running!)
+    # Send to Ollama
     ollama_url = "http://localhost:11434/api/generate"
     payload = {
-        "model": "codellama", # The model we pulled
+        "model": "codellama",
         "prompt": prompt,
-        "stream": False # Wait for the full response
+        "stream": False
     }
 
     try:
-        response = requests.post(ollama_url, json=payload, timeout=180) # 3 min timeout
-        response.raise_for_status() # Raise an error if the request failed
+        response = requests.post(ollama_url, json=payload, timeout=180)
+        response.raise_for_status()
 
-        # 4. Get the review text and send it back to the frontend
         response_data = response.json()
         review_text = response_data.get("response", "Error: No response from model.")
 
-        _record_review_in_supabase(code_to_review, review_text)
-
-        return Response({'review': review_text})
+        if auto_fix:
+            # Extract fixed code from the response
+            import re
+            
+            fixed_code = ''
+            
+            # Method 1: Try to extract code from markdown code blocks
+            # Pattern: ```language\ncode\n```
+            code_block_pattern = r'```(?:' + language + r')?\s*\n(.*?)\n```'
+            matches = re.findall(code_block_pattern, review_text, re.DOTALL)
+            
+            if matches:
+                # Use the first (or largest) code block as the fixed code
+                fixed_code = max(matches, key=len) if len(matches) > 1 else matches[0]
+            else:
+                # Method 2: Look for "Fixed Code" section
+                fixed_section_pattern = r'##\s*Fixed Code\s*[:\n]+(.*?)(?=\n##|\Z)'
+                fixed_match = re.search(fixed_section_pattern, review_text, re.DOTALL | re.IGNORECASE)
+                if fixed_match:
+                    fixed_code = fixed_match.group(1).strip()
+                    # Remove code fence markers if present
+                    fixed_code = re.sub(r'^```\w*\n|```$', '', fixed_code, flags=re.MULTILINE).strip()
+            
+            # Clean up the fixed code
+            if fixed_code:
+                fixed_code = fixed_code.strip()
+            
+            return Response({
+                'review': review_text,
+                'fixed_code': fixed_code,
+                'has_fix': bool(fixed_code)
+            })
+        else:
+            return Response({'review': review_text})
 
     except requests.exceptions.ConnectionError:
         return Response(
@@ -91,41 +168,4 @@ def review_code(request):
         return Response(
             {'error': f'An error occurred: {e}'}, 
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
-
-
-@api_view(['GET'])
-def review_history(request):
-    """Return the most recent code reviews stored in Supabase."""
-    supabase_client = getattr(settings, 'supabase', None)
-    if not supabase_client:
-        return Response(
-            {'error': 'Supabase client is not configured on the server.'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        )
-
-    try:
-        response = (
-            supabase_client
-            .table('code_reviews')
-            .select('id, input_code, review, created_at')
-            .order('created_at', desc=True)
-            .limit(10)
-            .execute()
-        )
-
-        error = getattr(response, 'error', None)
-        if error:
-            message = getattr(error, 'message', None)
-            if not message and isinstance(error, dict):
-                message = error.get('message')
-            logger.warning('Supabase history fetch error: %s', message or error)
-            return Response({'error': message or 'Failed to fetch history.'}, status=status.HTTP_502_BAD_GATEWAY)
-
-        return Response({'data': getattr(response, 'data', [])})
-    except Exception as exc:
-        logger.exception('Failed to fetch review history from Supabase: %s', exc)
-        return Response(
-            {'error': 'Unable to retrieve review history at this time.'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )

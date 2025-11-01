@@ -11,9 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
-from decouple import config
 import os
-import dj_database_url
 from dotenv import load_dotenv
 load_dotenv()  # add this near the top
 
@@ -82,25 +80,13 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
-# Supabase Configuration
-SUPABASE_URL = config('URL')
-SUPABASE_KEY = config('ANON_KEY')
-SUPABASE_JWT_SECRET = config('JWT_SECRET')
-SUPABASE_DB_URL = config('SUPABASE_DB_URL', default='')
-
-# Database configuration using dj-database-url
-# Falls back to SQLite if Supabase connection is not available
-if SUPABASE_DB_URL:
-    DATABASES = {
-        "default": dj_database_url.config(default=SUPABASE_DB_URL)
+# Database - Using SQLite for Django admin/sessions only
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3',
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 
 # Password validation
@@ -147,8 +133,3 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
 ]
-
-# Supabase Client Configuration
-from supabase import create_client, Client
-
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
