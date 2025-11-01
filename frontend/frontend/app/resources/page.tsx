@@ -7,6 +7,9 @@ export default function ResourcesPage() {
   const router = useRouter();
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installStatus, setInstallStatus] = useState<string>('');
+  const [vscodeStatus, setVscodeStatus] = useState<any>(null);
 
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -23,6 +26,82 @@ export default function ResourcesPage() {
       console.error('Download failed:', error);
       setDownloading(null);
       alert('Download failed. Please try again.');
+    }
+  };
+
+  const checkVSCodeStatus = async () => {
+    try {
+      const response = await fetch('/api/install-extension', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'check' }),
+      });
+      
+      if (!response.ok) {
+        console.error('API returned error:', response.status);
+        setVscodeStatus({
+          vscodeInstalled: false,
+          message: 'Unable to check VS Code status. API endpoint may not be ready.',
+        });
+        return null;
+      }
+      
+      const data = await response.json();
+      setVscodeStatus(data);
+      return data;
+    } catch (error) {
+      console.error('Failed to check VS Code status:', error);
+      setVscodeStatus({
+        vscodeInstalled: false,
+        message: 'Unable to connect to API. Please restart Next.js server.',
+      });
+      return null;
+    }
+  };
+
+  const installExtension = async () => {
+    setInstalling(true);
+    setInstallStatus('Checking VS Code installation...');
+
+    try {
+      // Check if VS Code is installed
+      const status = await checkVSCodeStatus();
+      if (!status) {
+        setInstallStatus('❌ API Error: Please restart Next.js server (npm run dev in frontend/frontend folder)');
+        setInstalling(false);
+        return;
+      }
+      if (!status.vscodeInstalled) {
+        setInstallStatus('❌ VS Code not found. Please install VS Code first and ensure "code" command is in PATH.');
+        setInstalling(false);
+        return;
+      }
+
+      setInstallStatus('Building extension... (this may take 1-2 minutes)');
+      
+      // Build and install
+      const response = await fetch('/api/install-extension', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'install' }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setInstallStatus('✅ Extension installed! Please reload VS Code.');
+        setTimeout(() => {
+          setInstallStatus('');
+          checkVSCodeStatus(); // Refresh status
+        }, 5000);
+      } else {
+        setInstallStatus(`❌ Installation failed: ${data.error || data.details || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Installation error:', error);
+      setInstallStatus(`❌ Installation failed: ${error.message}`);
+    } finally {
+      setInstalling(false);
     }
   };
 
@@ -332,7 +411,15 @@ volumes:
           <div className="flex items-start gap-4">
             <div className="text-4xl">✨</div>
             <div className="flex-1">
-              <h2 className="text-2xl font-bold text-white mb-3">Ready to Download!</h2>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-2xl font-bold text-white">Ready to Download!</h2>
+                <button
+                  onClick={checkVSCodeStatus}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors"
+                >
+                  🔍 Check VS Code Status
+                </button>
+              </div>
               <div className="space-y-2 text-gray-300">
                 <p className="flex items-center gap-2">
                   <span className="text-green-400">✓</span>
@@ -340,18 +427,31 @@ volumes:
                 </p>
                 <p className="flex items-center gap-2">
                   <span className="text-green-400">✓</span>
-                  <strong>VS Code Extension:</strong> Download build instructions or quick-start guide
+                  <strong>VS Code Extension:</strong> One-click auto-installer (recommended!)
                 </p>
                 <p className="flex items-center gap-2">
                   <span className="text-green-400">✓</span>
                   <strong>Docker Setup:</strong> One-click download of docker-compose.yml
                 </p>
               </div>
-              <div className="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
-                <p className="text-sm text-blue-200">
-                  💡 <strong>Tip:</strong> All files are served from your local installation - no external dependencies!
-                </p>
-              </div>
+              {vscodeStatus && (
+                <div className="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
+                  <p className="text-sm text-blue-200 font-semibold mb-2">
+                    �️ System Status:
+                  </p>
+                  <div className="text-xs text-gray-300 space-y-1">
+                    <p>• VS Code: {vscodeStatus.vscodeInstalled ? <span className="text-green-400">✓ Installed ({vscodeStatus.vscodeVersion})</span> : <span className="text-red-400">✗ Not found</span>}</p>
+                    <p>• DEVCOR Extension: {vscodeStatus.extensionInstalled ? <span className="text-green-400">✓ Installed</span> : <span className="text-yellow-400">Not installed</span>}</p>
+                  </div>
+                </div>
+              )}
+              {!vscodeStatus && (
+                <div className="mt-4 p-3 bg-blue-900/30 border border-blue-700 rounded-lg">
+                  <p className="text-sm text-blue-200">
+                    �💡 <strong>Tip:</strong> All files are served from your local installation - no external dependencies!
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -419,6 +519,76 @@ volumes:
                       </button>
                     ))}
                   </div>
+
+                  {/* One-Click Installer for VS Code Extension */}
+                  {resource.id === 'vscode-extension' && (
+                    <div className="mt-6 p-4 bg-gradient-to-r from-green-900/30 to-blue-900/30 border border-green-700 rounded-lg">
+                      <h4 className="text-lg font-semibold text-white mb-3 flex items-center gap-2">
+                        <span>🚀</span>
+                        <span>One-Click Auto-Installer</span>
+                        <span className="text-xs bg-green-600 text-white px-2 py-1 rounded">RECOMMENDED</span>
+                      </h4>
+                      <p className="text-sm text-gray-300 mb-4">
+                        Install the extension directly to your VS Code with a single click! This will:
+                        build the extension, package it, and install it automatically.
+                      </p>
+                      
+                      <button
+                        onClick={installExtension}
+                        disabled={installing}
+                        className="w-full px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white font-bold rounded-lg hover:from-green-700 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-600 transition-all shadow-lg flex items-center justify-center gap-2"
+                      >
+                        {installing ? (
+                          <>
+                            <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Installing...
+                          </>
+                        ) : (
+                          <>
+                            <span>⚡</span>
+                            <span>Install Extension to VS Code Now</span>
+                          </>
+                        )}
+                      </button>
+
+                      {installStatus && (
+                        <div className={`mt-4 p-3 rounded-lg ${
+                          installStatus.includes('✅') 
+                            ? 'bg-green-900/50 border border-green-700 text-green-200' 
+                            : installStatus.includes('❌')
+                            ? 'bg-red-900/50 border border-red-700 text-red-200'
+                            : 'bg-blue-900/50 border border-blue-700 text-blue-200'
+                        }`}>
+                          {installStatus}
+                        </div>
+                      )}
+
+                      {vscodeStatus && (
+                        <div className="mt-4 text-xs text-gray-400 space-y-1">
+                          <p>✓ VS Code: {vscodeStatus.vscodeInstalled ? `Installed (${vscodeStatus.vscodeVersion})` : 'Not found'}</p>
+                          <p>✓ Extension: {vscodeStatus.extensionInstalled ? 'Already installed' : 'Not installed'}</p>
+                          {vscodeStatus.message && (
+                            <p className="text-yellow-400 mt-2">⚠️ {vscodeStatus.message}</p>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Troubleshooting */}
+                      {installStatus.includes('❌') && (
+                        <div className="mt-4 p-3 bg-yellow-900/30 border border-yellow-700 rounded-lg">
+                          <p className="text-sm font-semibold text-yellow-300 mb-2">🔧 Troubleshooting:</p>
+                          <ul className="text-xs text-yellow-200 space-y-1 list-disc list-inside">
+                            <li><strong>404 Error:</strong> Restart Next.js: Stop terminal (Ctrl+C) and run <code className="bg-black px-1">npm run dev</code></li>
+                            <li><strong>VS Code not found:</strong> Install VS Code and add to PATH, or use manual installation below</li>
+                            <li><strong>Permission denied:</strong> Run VS Code as administrator once</li>
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Installation Steps */}
